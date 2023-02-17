@@ -1,0 +1,594 @@
+---
+title: "Projekt"
+author: "Stella Balić, Jan Kolić, Marko Peroš, Jana Perak"
+date: "2023-01-06"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Uvod
+
+U ovom dokumentu bavit ćemo se analizom potrošnje kućanstava. Ova analiza koristi podatke sakupljene na temelju ankete koju je proveo španjolski Institut za statistiku (Instituto Nacional de Estad´ıstica ili INE) u svrhu uskladivanja životnog standarda u državi. Koristit ćemo skup podataka iz 2019. i 2020. godine.
+
+## Učitavanje
+
+Učitajmo potrebne pakete.
+
+```{r echo=T, error=FALSE, warning=FALSE, message=FALSE}
+library(dplyr)
+```
+
+Učitajmo podatke.
+
+```{r}
+kucanstva19 = read.csv("datasets/hogar_epf_2019.csv", header = TRUE)
+kucanstva20 = read.csv("datasets/hogar_epf_2020.csv", header = TRUE)
+#potrosnja19 = read.csv("datasets/gastos_epf_2019.csv", header = TRUE)
+#potrosnja20 = read.csv("datasets/gastos_epf_2020.csv", header = TRUE)
+dim(kucanstva19)
+dim(kucanstva20)
+#dim(potrosnja19)
+#dim(potrosnja20)
+```
+
+## 1. Postoji li zavisnost izmedu broja članova kućanstva i energenta koji se upotrebljava za dobivanje tople vode?
+
+Varijabla NMIEMB govori o broju članova kućanstva, a varijabla FUENAGUA govori o energentu koje kućanstvo upotrebljava za grijanje vode. Slijedeći opis varijabli, NMIEMB može poprimiti vrijednosti 0-19, a FUENAGUA: 1 Electricity, 2 Natural gas, 3 Liquefied gas, 4 Other liquid fuels, 5 Solid fuels, 6 Others, b Not applicable, -9 Not stated. Iz ovoga slijedi da cemo promatrati samo one retke kojima je varijabla FUENAGUA iz skupa {1, 2, 3, 4, 5, 6}. Koristit ćemo $\chi^2$ test provjere nezavisnosti.
+
+Prvo ćemo provjeriti koje su sve moguće vrijednosti varijabli u našim podacima.
+
+```{r}
+unique(kucanstva19$FUENAGUA)
+unique(kucanstva19$NMIEMB)
+```
+
+Vrijednosti varijable NMIEMB nam odgovaraju, a iz varijable FUENAGUA ćemo uzeti samo one koje označavaju energent.
+
+```{r}
+kucanstva19_final = subset(kucanstva19, FUENAGUA %in% c(1,2,3,4,5,6))
+dim(kucanstva19_final)
+```
+
+Možemo prikazati kontigencijsku tablicu i vizualizirati kako su raspoređene vrijednosti i što bismo mogli pretpostaviti što će test pokazati.
+
+```{r}
+f_tbl = table(kucanstva19_final$NMIEMB, kucanstva19_final$FUENAGUA) #tablica frekvencija
+f_tbl
+
+# Radimo histograme:
+b = seq(min(kucanstva19_final$NMIEMB)-1,max(kucanstva19_final$NMIEMB) , 1)
+
+h1 = hist(kucanstva19_final[kucanstva19_final["FUENAGUA"] == 1,]$NMIEMB,
+         breaks=b,
+         plot=FALSE)
+h2 = hist(kucanstva19_final[kucanstva19_final["FUENAGUA"] == 2,]$NMIEMB,
+         breaks=b,
+         plot=FALSE)
+h3 = hist(kucanstva19_final[kucanstva19_final["FUENAGUA"] == 3,]$NMIEMB,
+         breaks=b,
+         plot=FALSE)
+h4 = hist(kucanstva19_final[kucanstva19_final["FUENAGUA"] == 4,]$NMIEMB,
+         breaks=b,
+         plot=FALSE)
+h5 = hist(kucanstva19_final[kucanstva19_final["FUENAGUA"] == 5,]$NMIEMB,
+         breaks=b,
+         plot=FALSE)
+h6 = hist(kucanstva19_final[kucanstva19_final["FUENAGUA"] == 6,]$NMIEMB,
+         breaks=b,
+         plot=FALSE)
+
+data <- t(cbind(h1$counts,h2$counts,h3$counts,h4$counts,h5$counts,h6$counts))
+
+#Njihove counts koristimo za barplot
+barplot(data,beside=TRUE, col=c("lightblue", "purple", "lightgreen", "lightyellow", "pink", "orange" ), xlab="Broj ukućana u kućanstvu", ylab='Frekvencija u kategoriji')
+
+a = seq(0,9, 1)
+c=seq(4,67,7)
+axis(1, at = c, labels = a)
+
+legend("topright",c("Elektricity","Natural gas","Liquefied gas", "Other liquid fuels", "Solid fuels", "Others"),fill = c("lightblue", "purple", "lightgreen", "lightyellow", "pink", "orange" ))
+
+
+
+
+```
+
+
+Sada ćemo krenuti s testom za što prvo trebamo provjeriti vrijednosti očekivanih frekvencija, pretpostavka testa je da su sve veće od 5. U slučaju da nisu, vršit ćemo grupaciju.
+
+Kontigencijska tablica
+
+```{r}
+c_table = addmargins(f_tbl)
+c_table #kontigencijska tablica
+```
+
+Provjera očekivanih frekvencija
+
+```{r}
+counter=0
+for (col_names in colnames(c_table)){
+  for (row_names in rownames(c_table)){
+    if (!(row_names == 'Sum' | col_names == 'Sum') ){
+      cat('Očekivane frekvencije za razred ',col_names,'-',row_names,': ',(c_table[row_names,'Sum'] * c_table['Sum',col_names]) / c_table['Sum','Sum'],'\n')
+      if (c_table[row_names,'Sum'] * c_table['Sum',col_names] / c_table['Sum','Sum']<=5){
+        counter=counter+1
+    }
+  }
+  }
+}
+cat("\nBroj očekivanih frekvencija <= 5 je ", counter)
+```
+
+Uočavamo da imamo više očekivanih frekvencija manjih od 5 pa ćemo broj ukućana grupirati.
+
+Napravit ćemo dvije grupacije. Prvo ćemo grupirat u grupe 0-2 (kućanstvo s malim brojem ukućana), 3-4 (kućanstvo sa srednjim brojem ukućana) i 5-9 (kućanstvo s velikim brojem ukućana). Zatim u grupe 0-1, 2, 3, 4-9 kako bismo pokušali dobiti što sličniji broj kućanstava u svakoj grupi. Ovo radimo kako bismo pokazali da način grupiranja ne utječe na konačan rezultat testa.
+
+Kako bi izgledao prikaz s bar plotom?
+
+```{r}
+# Grupirajmo na 1. nacin
+kucanstva19_final$NMIEMB_group2 <- cut(kucanstva19_final$NMIEMB, breaks = c(0, 2, 4, 9), labels = c("0-2", "3-4", "5-9"))
+
+c_table2 <- table(kucanstva19_final$FUENAGUA, kucanstva19_final$NMIEMB_group2)
+
+c_table2
+
+barplot(c_table2, beside = TRUE,xlab = "Broj ukućana u kućanstvu", ylab = 'Frekvencija u kategoriji', col = c("lightblue", "purple", "lightgreen", "lightyellow", "pink", "orange"))
+legend("topright", c("Elektricity", "Natural gas", "Liquefied gas", "Other liquid fuels", "Solid fuels", "Others"), fill = c("lightblue", "purple", "lightgreen", "lightyellow", "pink", "orange"))
+```
+
+```{r}
+# Grupirajmo na 2. nacin
+kucanstva19_final$NMIEMB_group3 <- cut(kucanstva19_final$NMIEMB, breaks = c(0, 1, 2, 3, 9), labels = c("0-1", "2", "3", "4-9"))
+
+c_table3 <- table(kucanstva19_final$FUENAGUA, kucanstva19_final$NMIEMB_group3)
+
+c_table3
+
+barplot(c_table3, beside = TRUE,xlab = "Broj ukućana u kućanstvu", ylab = 'Frekvencija u kategoriji', col = c("lightblue", "purple", "lightgreen", "lightyellow", "pink", "orange"))
+legend("topright", c("Elektricity", "Natural gas", "Liquefied gas", "Other liquid fuels", "Solid fuels", "Others"), fill = c("lightblue", "purple", "lightgreen", "lightyellow", "pink", "orange"))
+
+
+```
+
+```{r}
+c_table_2 <- table(kucanstva19_final$NMIEMB_group2, kucanstva19_final$FUENAGUA)
+c_table_3 <- table(kucanstva19_final$NMIEMB_group3, kucanstva19_final$FUENAGUA)
+```
+
+Kontigencijska tablica za prvu grupaciju:
+
+```{r}
+c_table2 = addmargins(c_table_2)
+c_table2 #kontigencijska tablica
+```
+
+Kontigencijska tablica za drugu grupaciju:
+
+```{r}
+c_table3 = addmargins(c_table_3)
+c_table3 #kontigencijska tablica
+
+```
+
+Provjera očekivanih frekvencija za prvu grupaciju:
+
+```{r}
+counter = 0
+for (col_names in colnames(c_table2)){
+  for (row_names in rownames(c_table2)){
+    if (!(row_names == 'Sum' | col_names == 'Sum') ){
+      cat('Očekivane frekvencije za razred ',col_names,'-',row_names,': ',(c_table2[row_names,'Sum'] * c_table2['Sum',col_names]) / c_table2['Sum','Sum'],'\n')
+      if (c_table2[row_names,'Sum'] * c_table2['Sum',col_names] / c_table2['Sum','Sum']<=5){
+        counter=counter+1
+      }
+    }
+  }
+}
+
+cat("\nBroj očekivanih frekvencija <= 5 je ", counter)
+```
+
+Provjera očekivanih frekvencija za drugu grupaciju:
+
+```{r}
+counter = 0
+for (col_names in colnames(c_table3)){
+  for (row_names in rownames(c_table3)){
+    if (!(row_names == 'Sum' | col_names == 'Sum') ){
+      cat('Očekivane frekvencije za razred ',col_names,'-',row_names,': ',(c_table3[row_names,'Sum'] * c_table3['Sum',col_names]) / c_table3['Sum','Sum'],'\n')
+      if (c_table3[row_names,'Sum'] * c_table3['Sum',col_names] / c_table3['Sum','Sum']<=5){
+        counter=counter+1
+      }
+    }
+  }
+}
+
+cat("\nBroj očekivanih frekvencija <= 5 je ", counter)
+```
+
+Sada ćemo provesti test nezavisnosti za prvu grupaciju:
+
+```{r}
+chisq.test(c_table_2,correct=F)
+
+```
+
+Sada ćemo provesti test nezavisnosti za drugu grupaciju:
+
+```{r}
+chisq.test(c_table_3,correct=F)
+
+```
+
+S obzirom da oba testa daju p-vrijednosti jako male (manje od 0.05), odbacujemo H0 i prihvaćamo alternativu, tj da su broj ukućana i energent koji se korist za grijanje vode zavisne varijable.
+
+Dakle, zavisnost ove dvije varijable je kompleksnija od onoga što je vizualno bilo vidljivo na bar plotu, gdje se možda pogrešno moglo naslutiti da su nezavisne.
+
+## 2. Impliciraju li visoka mjesečna primanja dostupnost druge nekretnine?
+
+Koristit ćemo varijablu IMPEXAC. IMPEXAC predstavlja točnu količinu ukupnog mjesečnog neto prihoda pojedinog kućanstva. Raspon vrijednosti je između 0-99999.
+
+Želimo provjeriti nedostaju li nam podatci:
+```{r}
+sum(is.na(kucanstva19$IMPEXAC))
+```
+
+Osnovna deskriptivna statistika:
+```{r}
+summary(kucanstva19$IMPEXAC)
+```
+Sada ćemo prikazati podatke o neto mjesečnim primanjima uz pomoć histograma:
+```{r}
+hist(kucanstva19$IMPEXAC)
+```
+
+Sada ćemo prikazati podatke uz pomoć box-plota:
+```{r}
+boxplot(kucanstva19$IMPEXAC)
+```
+Također imamo velik broj stršećih vrijednost povezanih s ukupnim mjesečnim neto prihodom pojedinog kućanstva, što pokazuje i box-plot
+Zanima nas koliko gornjih stršećih vrijednosti imamo:
+```{r}
+IRQ19 = 1.5 * (quantile(kucanstva19$IMPEXAC, 0.75) - quantile(kucanstva19$IMPEXAC, 0.25))
+IRQ19
+ind19 = which(kucanstva19$IMPEXAC > IRQ19 + quantile(kucanstva19$IMPEXAC, 0.75))
+length(kucanstva19$IMPEXAC[ind19]) #broj stršećih vrijednost 
+length(kucanstva19$IMPEXAC) #ukupan broj podataka
+length(kucanstva19$IMPEXAC[ind19]) / length(kucanstva19$IMPEXAC) * 100 #% stršećih vrijednosti
+```
+S obzirom na broj stršećih vrijednosti podrezat ćemo gornjih 5% podataka:
+```{r}
+trimKucanstva19 = kucanstva19[kucanstva19$IMPEXAC < quantile(kucanstva19$IMPEXAC, 0.95), ]
+dim(trimKucanstva19)
+```
+```{r}
+hist(trimKucanstva19$IMPEXAC)
+```
+Želimo provjeriti odnos primanja pojedinog kućanstva i dostupnost druge nekretnine kućanstvu. Za pokazivanje navedenog dovoljno je provjeriti postojanje vrijednosti varijable REGTENV1, koja govori o načinu korištenja stambenog prostora, odnosno, ako vrijednost varijable REGTENV1 postoji onda kućanstvo ima dostupnu drugu nekretninu uz glavni stambeni prostor, inače kućanstvo nema dostupnu drugu nekretninu uz glavni stambeni prostor.
+
+```{r}
+unique(trimKucanstva19$REGTENV1)
+```
+Izdvojit podatke varijabli IMPEXAC i REGTENV1.
+```{r}
+kucPrimDostupno19 = data.frame(
+  IMPEXAC = trimKucanstva19$IMPEXAC, 
+  REGTENV1 = trimKucanstva19$REGTENV1
+)
+
+head(kucPrimDostupno19)
+```
+Ova tablica služit će nam kako bi prikazali dostupnost druge nekretnine (DOSTUPNO = 1) ili nedostupnost druge nekretnine (DOSTUPNO = 0)
+
+```{r}
+dostupno19 = data.frame(
+  IMPEXAC = trimKucanstva19$IMPEXAC, 
+  DOSTUPNO = rep(0, nrow(trimKucanstva19))
+)
+
+head(dostupno19)
+```
+
+Označavamo koja kućanstva imaju dostupnu drugu nekretninu za godinu 2019.
+```{r}
+for(i in 1:nrow(kucPrimDostupno19)){
+  for(j in 2:ncol(kucPrimDostupno19)){
+    if(!is.na(kucPrimDostupno19[i, j]) && kucPrimDostupno19[i, j] != 0){
+      dostupno19[i, 2] = 1
+    }
+  }
+}
+dim(dostupno19)
+head(dostupno19)
+```
+
+Sada ćemo podijeliti podatke u dvije tablice, na one s dostupnom drugom nekretninom i nedostupnom drugom nekretninom. 
+```{r}
+dostupno19_da = dostupno19[dostupno19$DOSTUPNO == 1, ]
+
+dostupno19_ne = dostupno19[dostupno19$DOSTUPNO == 0, ]
+
+head(dostupno19_da)
+head(dostupno19_ne)
+dim(dostupno19_da)
+dim(dostupno19_ne)
+```
+
+Prikažimo sada pojedine skupine histogramom:
+```{r}
+hist(dostupno19_ne$IMPEXAC)
+dim(dostupno19_ne)
+hist(dostupno19_da$IMPEXAC)
+dim(dostupno19_da)
+```
+
+Želimo provjeriti dolaze li podatci iz normalne distribucije:
+```{r}
+require(nortest)
+lillie.test(dostupno19_ne$IMPEXAC)
+lillie.test(dostupno19_da$IMPEXAC)
+```
+Iz ovoga možemo zaključiti da podatci ne dolaze iz normalne distribucije.
+
+S obzirom na to da podatci nisu normalno distribuirani ali imamo velik uzorak podataka, koristit ćemo t-test prilikom usporedbe srednjih vrijednosti dviju skupina zato što je t-test robustan na odstupanja od pretpostavke normalnosti prilikom velikih uzoraka.
+
+$$ \begin{aligned}
+  H_0 & : \mu_{dostupno19ne} = \mu_{dostupno19da}\ \\
+  H_1 & : \mu_{dostupno19ne} < \mu_{dostupno19da}.
+\end{aligned} $$
+
+
+Sada ćemo usporediti srednje vrijednosti mjesečnih neto primanja pojedinih grupa uz pomoć t-testa.
+```{r}
+t.test(dostupno19_ne$IMPEXAC, dostupno19_da$IMPEXAC, alternative = "less")
+```
+Možemo odbaciti H0 u korist H1, odnosno zaključujemo da visoka mjesečna primanja impliciraju dostupnost druge nekretnine.
+
+#Logistička regresija
+
+```{r}
+dim(dostupno19)
+logistickaRegresija19 = glm(dostupno19$DOSTUPNO ~ dostupno19$IMPEXAC, data = dostupno19, family = binomial())
+
+summary(logistickaRegresija19)
+logistickaRegresija19
+
+```
+
+```{r}
+yHat19 = logistickaRegresija19$fitted.values > 0.2
+
+tab19 = table(dostupno19$DOSTUPNO, yHat19)
+tab19
+
+accuracy19 = sum(diag(tab19)) / sum(tab19)
+precision19 = tab19[2,2] / sum(tab19[,2])
+recall19 = tab19[2,2] / sum(tab19[2,])
+specificity19 = tab19[1,1] / sum(tab19[,1])
+ 
+accuracy19#true positive / (all)
+precision19 #true positive / (true positive + false positive) -> true positive / total predicted positive
+recall19 #true positive / (true positive + false negative)
+specificity19 #
+```
+Granicu koja klasificira naše podatke kao TRUE ili FALSE postavili smo na vrijednost od 0,2. Možemo primijetiti kako naš model ima visoku točnost (u 76,8% slučajeva točno predvidi ishod) i specifičnost(ispravno klasificira 86,9% netočnih podataka od ukupno netočnih podataka), ali ne i visoku preciznost(u 86,9% slučajeva klasificira podatke kao točne kada oni uistinu jesu točni) i odziv(u 25,7% slučajeva ispravno klasificira točne podatke od svih točnih podataka). Ovime možemo zaključiti kako model nije idealan. 
+
+## 3. Usporedba potrošnje kućanstava s regijom u kojoj se nalazi.
+
+Varijabla CCAA govori o regijama u kojima se nalaze ispitivana kućanstva, a varijabla GASTOT govori o ukupnom iznosu godišnjih izdataka kućanstva.
+
+Provjerit ćemo koje vrijednosti mogu poprimiti ove varijable.
+
+```{r}
+unique(kucanstva19$CCAA)
+
+min(kucanstva19$GASTOT)
+max(kucanstva19$GASTOT)
+
+sum(is.na(kucanstva19$CCAA)) 
+sum(is.na(kucanstva19$GASTOT))
+
+```
+
+Vidimo da varijabla CCAA može poprimiti vrijednosti:
+
+0
+1-Andalusia, 
+2-Aragon, 
+3-Asturias, Principality of, 
+4-Balears, Illes, 
+5-Canary Islands, 
+6-Cantabria, 
+7-Castilla y León, 
+8-Castilla - La Mancha, 
+9-Catalonia
+
+Varijabla GASTOT može poprimiti numeričke vrijednosti od 22235148 do 38167962730.
+
+Također vidimo da nema nedostajućih vrijednosti, ali u varijabli CCAA postoji vrijednost 0 koja ne označava ništa pa ćemo nju izbaciti.
+ 
+```{r}
+kucanstva19.cleaned <- filter(kucanstva19, CCAA != 0)
+unique(kucanstva19.cleaned$CCAA)
+
+#izbacit ćemo nedostajuće vrijednosti nastale izbacivanjem 0
+kucanstva19 <- kucanstva19.cleaned[complete.cases(kucanstva19.cleaned$CCAA),]
+sum(is.na(kucanstva19$CCAA))
+```
+
+Želimo usporediti potrošnju kućanstava s obzirom na to u kojoj regiji se nalaze.
+ANOVA je metoda kojom testiramo sredine više populacija. Koristit ćemo jednofaktorski ANOVA model gdje se razmatra utjecaj jednog faktora, u našem slučaju regija u kojoj se kućanstvo nalazi.
+
+Analizom varijance testiramo:
+$$ \begin{aligned}
+  H_0 & : \mu_1 = \mu_2 = \ldots = \mu_k \\
+  H_1 & : \text{barem dvije sredine nisu iste}.
+\end{aligned} $$
+
+Pripremit ćemo podatke.
+
+```{r}
+
+kucanstva19$CCAA = factor(kucanstva19$CCAA,levels = c(1, 2, 3, 4, 5, 6, 7, 8, 9),labels = c('Andalusia', 'Aragon', 'Asturias, Principality of', 'Balears, Illes', 'Canary Islands', 'Cantabria', 'Castilla y León', 'Castilla - La Mancha', 'Catalonia'))
+
+```
+
+```{r}
+summary(kucanstva19$CCAA)
+```
+
+Prije izvedbe testa, porvjerit ćemo jesu li pretpostavke ANOVA-e zadovoljene.
+
+Pretpostavke ANOVA-e su nezavisnost pojedinih podataka u uzorcima, normalna razdioba podataka i homogenost varijanci među populacijama. 
+
+Kad su veličine grupa podjednake, ANOVA je relativno robusna metoda na blaga odstupanja od pretpostavke normalnosti i homogenosti varijanci. 
+Vidimo da su u našim podacima veličina grupa približno podjednake, ali ipak ćemo provjerit koliko su odstupanja od pretpostavki velika.
+
+
+Provjeru normalnosti možemo provjeriti Lillieforsovom inačicom KS testa. Vizualno možemo provjeriti normalnost histogramom. 
+U ovom slučaju razmatrat ćemo regije kao varijablu koja određuje grupe (populacije) i potrošnju kao zavisnu varijablu.
+
+```{r test pretpostavki - normalnost}
+require(nortest)
+
+lillie.test(kucanstva19$GASTOT)
+
+lillie.test(kucanstva19$GASTOT[kucanstva19$CCAA=='Andalusia'])
+lillie.test(kucanstva19$GASTOT[kucanstva19$CCAA=='Aragon'])
+lillie.test(kucanstva19$GASTOT[kucanstva19$CCAA=='Asturias, Principality of'])
+lillie.test(kucanstva19$GASTOT[kucanstva19$CCAA=='Balears, Illes'])
+lillie.test(kucanstva19$GASTOT[kucanstva19$CCAA=='Canary Islands'])
+lillie.test(kucanstva19$GASTOT[kucanstva19$CCAA=='Cantabria'])
+lillie.test(kucanstva19$GASTOT[kucanstva19$CCAA=='Castilla y León'])
+lillie.test(kucanstva19$GASTOT[kucanstva19$CCAA=='Castilla - La Mancha'])
+lillie.test(kucanstva19$GASTOT[kucanstva19$CCAA=='Catalonia'])
+
+hist(kucanstva19$GASTOT[kucanstva19$CCAA=='Andalusia'])
+hist(kucanstva19$GASTOT[kucanstva19$CCAA=='Aragon'])
+hist(kucanstva19$GASTOT[kucanstva19$CCAA=='Asturias, Principality of'])
+hist(kucanstva19$GASTOT[kucanstva19$CCAA=='Balears, Illes'])
+hist(kucanstva19$GASTOT[kucanstva19$CCAA=='Canary Islands'])
+hist(kucanstva19$GASTOT[kucanstva19$CCAA=='Cantabria'])
+hist(kucanstva19$GASTOT[kucanstva19$CCAA=='Castilla y León'])
+hist(kucanstva19$GASTOT[kucanstva19$CCAA=='Castilla - La Mancha'])
+hist(kucanstva19$GASTOT[kucanstva19$CCAA=='Catalonia'])
+
+```
+
+Pokušat ćemo log transformacijom približiti podatke normalnoj distribuciji.
+```{r - normalnost}
+
+lillie.test(log(kucanstva19$GASTOT))
+
+lillie.test(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Andalusia']))
+lillie.test(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Aragon']))
+lillie.test(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Asturias, Principality of']))
+lillie.test(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Balears, Illes']))
+lillie.test(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Canary Islands']))
+lillie.test(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Cantabria']))
+lillie.test(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Castilla y León']))
+lillie.test(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Castilla - La Mancha']))
+lillie.test(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Catalonia']))
+
+
+
+hist(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Andalusia']))
+hist(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Aragon']))
+hist(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Asturias, Principality of']))
+hist(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Balears, Illes']))
+hist(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Canary Islands']))
+hist(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Cantabria']))
+hist(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Castilla y León']))
+hist(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Castilla - La Mancha']))
+hist(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Catalonia']))
+
+```
+Sada vidimo da većina podataka ima normalnu razdiobu. Izbacit ćemo regije čija razdioba jako odstupa od normalne (Andalusia, Asturias, Principality of, Cantabria i Catalonia), te ćemo testiranje provesti na ostalim regijama.
+
+```{r}
+kucanstva19 <- filter(kucanstva19, CCAA != "Andalusia")
+kucanstva19 <- filter(kucanstva19, CCAA != "Asturias, Principality of")
+kucanstva19 <- filter(kucanstva19, CCAA != "Cantabria")
+kucanstva19 <- filter(kucanstva19, CCAA != "Catalonia")
+
+kucanstva19$CCAA <- droplevels(kucanstva19$CCAA, "Andalusia")
+kucanstva19$CCAA <- droplevels(kucanstva19$CCAA, "Asturias, Principality of")
+kucanstva19$CCAA <- droplevels(kucanstva19$CCAA, "Cantabria")
+kucanstva19$CCAA <- droplevels(kucanstva19$CCAA, "Catalonia")
+
+```
+
+```{r}
+summary(kucanstva19$CCAA)
+sum(is.na(kucanstva19$CCAA))
+```
+
+Zanima nas koliko stršećih vrijednosti imamo:
+```{r}
+
+IRQ19 = 1.5 * (quantile(kucanstva19$GASTOT, 0.75) - quantile(kucanstva19$GASTOT, 0.25))
+ind19h = which(kucanstva19$GASTOT > IRQ19 + quantile(kucanstva19$GASTOT, 0.75))
+
+cat(length(kucanstva19$GASTOT[ind19h]) / length(kucanstva19$GASTOT) * 100, "% gornjih stršećih vrijednosti\n")
+
+
+IRQ19 = 1.5 * (quantile(kucanstva19$GASTOT, 0.75) - quantile(kucanstva19$GASTOT, 0.25))
+ind19l = which(kucanstva19$GASTOT < IRQ19 - quantile(kucanstva19$GASTOT, 0.75))
+
+cat(length(kucanstva19$GASTOT[ind19l]) / length(kucanstva19$GASTOT) * 100, "% donjih stršećih vrijednosti\n")
+
+```
+
+Postotak stršećih vrijednosti nije velik, pa ih možemo izbaciti.
+```{r}
+kucanstva19.trimmed <- kucanstva19
+
+cat("Minimalna i maksimalna vrijednost prije izbacivanja stršećih vrijednosti: \n", min(kucanstva19.trimmed$GASTOT), "\n", max(kucanstva19.trimmed$GASTOT))
+
+kucanstva19.trimmed <- filter(kucanstva19.trimmed, GASTOT < 0.054*38167962730)
+
+cat("\nMinimalna i maksimalna vrijednost nakon izbacivanja stršećih vrijednosti: \n", min(kucanstva19.trimmed$GASTOT), "\n", max(kucanstva19.trimmed$GASTOT))
+
+```
+
+
+Homogenost varijanci testirat ćemo Bartlettovim testom. Naše hipoteze su:
+$$ \begin{aligned}
+  H_0 & : \sigma_1^2 = \sigma_2^2 = \ldots = \sigma_k^2 \\
+  H_1 & : \text{barem dvije varijance nisu iste}.
+\end{aligned} $$
+
+```{r test pretpostavki - homogenost varijanci}
+
+bartlett.test(log(kucanstva19$GASTOT) ~ kucanstva19$CCAA)
+
+var(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Aragon']))
+var(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Balears, Illes']))
+var(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Canary Islands']))
+var(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Castilla y León']))
+var(log(kucanstva19$GASTOT[kucanstva19$CCAA=='Castilla - La Mancha']))
+
+```
+
+Provjerimo postoji li razlika u potrošnji za različite regije u kojima se nalaze kućanstva. Provest ćemo test.
+
+```{r test razlike u potrosnji}
+
+boxplot(kucanstva19.trimmed$GASTOT ~ kucanstva19.trimmed$CCAA
+        , names = c("Aragon", "Balears", "Canary Isl", "C. y León", "C. La Mancha"))
+
+a = aov(kucanstva19.trimmed$GASTOT ~ kucanstva19.trimmed$CCAA)
+summary(a)
+
+```
+Grafički prikaz sugerira da postoji jasna razlika između grupa, pogotovo između regije Castilla y León i ostalih regija, što potvrđuje i ANOVA.
+
+## 4. Mogu li dostupne značajke predvidjeti ukupni mjesećni prihod kućanstva?
